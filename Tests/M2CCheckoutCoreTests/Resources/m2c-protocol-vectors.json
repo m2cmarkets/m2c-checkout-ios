@@ -1,0 +1,734 @@
+{
+  "_comment": "Cross-SDK vectors. HMAC answers come from the Go server implementation; status and checkout helper tables are hand-maintained contracts. Do not hand-edit. Regenerate with: go test ./server/vendor/ -run TestKATFixture -update-kat. See sdk/kat/README.md.",
+  "schema_version": 4,
+  "protocol": {
+    "preimage": "timestamp + \"\\n\" + body",
+    "signature_prefix": "sha256=",
+    "signature_header": "X-M2C-Signature",
+    "timestamp_header": "X-M2C-Timestamp",
+    "default_max_skew_seconds": 300
+  },
+  "sign": [
+    {
+      "name": "canonical_conversion_webhook",
+      "secret": "test-webhook-secret",
+      "timestamp": "1700000000",
+      "body": "{\"event\":\"conversion\",\"request_id\":\"abc\",\"status\":\"completed\",\"vendor\":\"550e8400-e29b-41d4-a716-446655440000\",\"transaction_id\":\"txn_abc\",\"timestamp\":\"2026-05-29T12:00:00Z\"}",
+      "signature": "sha256=1598869af7848e521651a7ed08c42f666f21407afa7049ccb1538d0a43782a44"
+    },
+    {
+      "name": "empty_body",
+      "secret": "test-webhook-secret",
+      "timestamp": "1700000000",
+      "body": "",
+      "signature": "sha256=511fa12b66477ee3588f7f7a700f4a5fb54f8445e7f8bdbd0409c9e8d813c3f4"
+    },
+    {
+      "name": "utf8_body",
+      "secret": "test-webhook-secret",
+      "timestamp": "1700000000",
+      "body": "{\"note\":\"café ☕\"}",
+      "signature": "sha256=3785e5a155a189a1d674b4530f5e6f2bdead72aa6457c1897d63295497160be1"
+    },
+    {
+      "name": "body_with_embedded_newline",
+      "secret": "test-webhook-secret",
+      "timestamp": "1700000000",
+      "body": "line1\nline2",
+      "signature": "sha256=8f679909770b2b5c7ee5daf389f6737b1fd3279f004da0b1a0210dc02ec00b63"
+    },
+    {
+      "name": "alternate_secret_and_timestamp",
+      "secret": "another-vendor-outbound-key",
+      "timestamp": "1893456000",
+      "body": "{\"bid_amount\":2.5}",
+      "signature": "sha256=b981b92c2966a3d3a018ce591febe7b2d435ea0d4491240c810500f5bf4f6ca6"
+    }
+  ],
+  "verify": [
+    {
+      "name": "valid",
+      "secret": "test-webhook-secret",
+      "body": "{\"event\":\"conversion\",\"request_id\":\"abc\",\"status\":\"completed\",\"vendor\":\"550e8400-e29b-41d4-a716-446655440000\",\"transaction_id\":\"txn_abc\",\"timestamp\":\"2026-05-29T12:00:00Z\"}",
+      "signature_header": "sha256=1598869af7848e521651a7ed08c42f666f21407afa7049ccb1538d0a43782a44",
+      "timestamp_header": "1700000000",
+      "now_seconds": 1700000000,
+      "max_skew_seconds": 300,
+      "valid": true,
+      "reason": null
+    },
+    {
+      "name": "valid_within_positive_skew",
+      "secret": "test-webhook-secret",
+      "body": "{\"event\":\"conversion\",\"request_id\":\"abc\",\"status\":\"completed\",\"vendor\":\"550e8400-e29b-41d4-a716-446655440000\",\"transaction_id\":\"txn_abc\",\"timestamp\":\"2026-05-29T12:00:00Z\"}",
+      "signature_header": "sha256=1598869af7848e521651a7ed08c42f666f21407afa7049ccb1538d0a43782a44",
+      "timestamp_header": "1700000000",
+      "now_seconds": 1700000299,
+      "max_skew_seconds": 300,
+      "valid": true,
+      "reason": null
+    },
+    {
+      "name": "valid_within_negative_skew",
+      "secret": "test-webhook-secret",
+      "body": "{\"event\":\"conversion\",\"request_id\":\"abc\",\"status\":\"completed\",\"vendor\":\"550e8400-e29b-41d4-a716-446655440000\",\"transaction_id\":\"txn_abc\",\"timestamp\":\"2026-05-29T12:00:00Z\"}",
+      "signature_header": "sha256=1598869af7848e521651a7ed08c42f666f21407afa7049ccb1538d0a43782a44",
+      "timestamp_header": "1700000000",
+      "now_seconds": 1699999701,
+      "max_skew_seconds": 300,
+      "valid": true,
+      "reason": null
+    },
+    {
+      "name": "empty_secret",
+      "secret": "",
+      "body": "{\"event\":\"conversion\",\"request_id\":\"abc\",\"status\":\"completed\",\"vendor\":\"550e8400-e29b-41d4-a716-446655440000\",\"transaction_id\":\"txn_abc\",\"timestamp\":\"2026-05-29T12:00:00Z\"}",
+      "signature_header": "sha256=1598869af7848e521651a7ed08c42f666f21407afa7049ccb1538d0a43782a44",
+      "timestamp_header": "1700000000",
+      "now_seconds": 1700000000,
+      "max_skew_seconds": 300,
+      "valid": false,
+      "reason": "empty_secret"
+    },
+    {
+      "name": "missing_both_headers",
+      "secret": "test-webhook-secret",
+      "body": "{\"event\":\"conversion\",\"request_id\":\"abc\",\"status\":\"completed\",\"vendor\":\"550e8400-e29b-41d4-a716-446655440000\",\"transaction_id\":\"txn_abc\",\"timestamp\":\"2026-05-29T12:00:00Z\"}",
+      "signature_header": "",
+      "timestamp_header": "",
+      "now_seconds": 1700000000,
+      "max_skew_seconds": 300,
+      "valid": false,
+      "reason": "missing"
+    },
+    {
+      "name": "incomplete_timestamp_only",
+      "secret": "test-webhook-secret",
+      "body": "{\"event\":\"conversion\",\"request_id\":\"abc\",\"status\":\"completed\",\"vendor\":\"550e8400-e29b-41d4-a716-446655440000\",\"transaction_id\":\"txn_abc\",\"timestamp\":\"2026-05-29T12:00:00Z\"}",
+      "signature_header": "",
+      "timestamp_header": "1700000000",
+      "now_seconds": 1700000000,
+      "max_skew_seconds": 300,
+      "valid": false,
+      "reason": "incomplete"
+    },
+    {
+      "name": "incomplete_signature_only",
+      "secret": "test-webhook-secret",
+      "body": "{\"event\":\"conversion\",\"request_id\":\"abc\",\"status\":\"completed\",\"vendor\":\"550e8400-e29b-41d4-a716-446655440000\",\"transaction_id\":\"txn_abc\",\"timestamp\":\"2026-05-29T12:00:00Z\"}",
+      "signature_header": "sha256=1598869af7848e521651a7ed08c42f666f21407afa7049ccb1538d0a43782a44",
+      "timestamp_header": "",
+      "now_seconds": 1700000000,
+      "max_skew_seconds": 300,
+      "valid": false,
+      "reason": "incomplete"
+    },
+    {
+      "name": "malformed_bad_algorithm_prefix",
+      "secret": "test-webhook-secret",
+      "body": "{\"event\":\"conversion\",\"request_id\":\"abc\",\"status\":\"completed\",\"vendor\":\"550e8400-e29b-41d4-a716-446655440000\",\"transaction_id\":\"txn_abc\",\"timestamp\":\"2026-05-29T12:00:00Z\"}",
+      "signature_header": "md5=1598869af7848e521651a7ed08c42f666f21407afa7049ccb1538d0a43782a44",
+      "timestamp_header": "1700000000",
+      "now_seconds": 1700000000,
+      "max_skew_seconds": 300,
+      "valid": false,
+      "reason": "malformed"
+    },
+    {
+      "name": "malformed_non_hex",
+      "secret": "test-webhook-secret",
+      "body": "{\"event\":\"conversion\",\"request_id\":\"abc\",\"status\":\"completed\",\"vendor\":\"550e8400-e29b-41d4-a716-446655440000\",\"transaction_id\":\"txn_abc\",\"timestamp\":\"2026-05-29T12:00:00Z\"}",
+      "signature_header": "sha256=zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+      "timestamp_header": "1700000000",
+      "now_seconds": 1700000000,
+      "max_skew_seconds": 300,
+      "valid": false,
+      "reason": "malformed"
+    },
+    {
+      "name": "malformed_wrong_length",
+      "secret": "test-webhook-secret",
+      "body": "{\"event\":\"conversion\",\"request_id\":\"abc\",\"status\":\"completed\",\"vendor\":\"550e8400-e29b-41d4-a716-446655440000\",\"transaction_id\":\"txn_abc\",\"timestamp\":\"2026-05-29T12:00:00Z\"}",
+      "signature_header": "sha256=abcd",
+      "timestamp_header": "1700000000",
+      "now_seconds": 1700000000,
+      "max_skew_seconds": 300,
+      "valid": false,
+      "reason": "malformed"
+    },
+    {
+      "name": "malformed_timestamp_not_integer",
+      "secret": "test-webhook-secret",
+      "body": "{\"event\":\"conversion\",\"request_id\":\"abc\",\"status\":\"completed\",\"vendor\":\"550e8400-e29b-41d4-a716-446655440000\",\"transaction_id\":\"txn_abc\",\"timestamp\":\"2026-05-29T12:00:00Z\"}",
+      "signature_header": "sha256=1598869af7848e521651a7ed08c42f666f21407afa7049ccb1538d0a43782a44",
+      "timestamp_header": "not-a-number",
+      "now_seconds": 1700000000,
+      "max_skew_seconds": 300,
+      "valid": false,
+      "reason": "malformed"
+    },
+    {
+      "name": "malformed_timestamp_out_of_range",
+      "secret": "test-webhook-secret",
+      "body": "{\"event\":\"conversion\",\"request_id\":\"abc\",\"status\":\"completed\",\"vendor\":\"550e8400-e29b-41d4-a716-446655440000\",\"transaction_id\":\"txn_abc\",\"timestamp\":\"2026-05-29T12:00:00Z\"}",
+      "signature_header": "sha256=0000000000000000000000000000000000000000000000000000000000000000",
+      "timestamp_header": "1700086401",
+      "now_seconds": 1700000000,
+      "max_skew_seconds": 300,
+      "valid": false,
+      "reason": "malformed"
+    },
+    {
+      "name": "malformed_timestamp_beyond_safe_integer",
+      "secret": "test-webhook-secret",
+      "body": "{\"event\":\"conversion\",\"request_id\":\"abc\",\"status\":\"completed\",\"vendor\":\"550e8400-e29b-41d4-a716-446655440000\",\"transaction_id\":\"txn_abc\",\"timestamp\":\"2026-05-29T12:00:00Z\"}",
+      "signature_header": "sha256=0000000000000000000000000000000000000000000000000000000000000000",
+      "timestamp_header": "9007199254740992",
+      "now_seconds": 1700000000,
+      "max_skew_seconds": 300,
+      "valid": false,
+      "reason": "malformed"
+    },
+    {
+      "name": "timestamp_skew_past",
+      "secret": "test-webhook-secret",
+      "body": "{\"event\":\"conversion\",\"request_id\":\"abc\",\"status\":\"completed\",\"vendor\":\"550e8400-e29b-41d4-a716-446655440000\",\"transaction_id\":\"txn_abc\",\"timestamp\":\"2026-05-29T12:00:00Z\"}",
+      "signature_header": "sha256=1598869af7848e521651a7ed08c42f666f21407afa7049ccb1538d0a43782a44",
+      "timestamp_header": "1700000000",
+      "now_seconds": 1700000301,
+      "max_skew_seconds": 300,
+      "valid": false,
+      "reason": "timestamp_skew"
+    },
+    {
+      "name": "timestamp_skew_at_future_bound",
+      "secret": "test-webhook-secret",
+      "body": "{\"event\":\"conversion\",\"request_id\":\"abc\",\"status\":\"completed\",\"vendor\":\"550e8400-e29b-41d4-a716-446655440000\",\"transaction_id\":\"txn_abc\",\"timestamp\":\"2026-05-29T12:00:00Z\"}",
+      "signature_header": "sha256=0000000000000000000000000000000000000000000000000000000000000000",
+      "timestamp_header": "1700086400",
+      "now_seconds": 1700000000,
+      "max_skew_seconds": 300,
+      "valid": false,
+      "reason": "timestamp_skew"
+    },
+    {
+      "name": "mismatch_flipped_nibble",
+      "secret": "test-webhook-secret",
+      "body": "{\"event\":\"conversion\",\"request_id\":\"abc\",\"status\":\"completed\",\"vendor\":\"550e8400-e29b-41d4-a716-446655440000\",\"transaction_id\":\"txn_abc\",\"timestamp\":\"2026-05-29T12:00:00Z\"}",
+      "signature_header": "sha256=1598869af7848e521651a7ed08c42f666f21407afa7049ccb1538d0a43782a45",
+      "timestamp_header": "1700000000",
+      "now_seconds": 1700000000,
+      "max_skew_seconds": 300,
+      "valid": false,
+      "reason": "mismatch"
+    },
+    {
+      "name": "mismatch_wrong_secret",
+      "secret": "different-secret",
+      "body": "{\"event\":\"conversion\",\"request_id\":\"abc\",\"status\":\"completed\",\"vendor\":\"550e8400-e29b-41d4-a716-446655440000\",\"transaction_id\":\"txn_abc\",\"timestamp\":\"2026-05-29T12:00:00Z\"}",
+      "signature_header": "sha256=1598869af7848e521651a7ed08c42f666f21407afa7049ccb1538d0a43782a44",
+      "timestamp_header": "1700000000",
+      "now_seconds": 1700000000,
+      "max_skew_seconds": 300,
+      "valid": false,
+      "reason": "mismatch"
+    }
+  ],
+  "status_coercion": {
+    "_note": "Client-facing status projection. Hand-maintained, lockstep-tested: server/handler TestClientStatusCoercionMatchesVectors pins these against the authoritative Go mapping; the checkout, checkout-receiver, and Unity suites assert their implementations against this same table. Reversals collapse to completed (the payment cleared); anything unrecognized fails safe to processing.",
+    "mappings": [
+      {
+        "server": "pending",
+        "client": "processing"
+      },
+      {
+        "server": "completed",
+        "client": "completed"
+      },
+      {
+        "server": "failed",
+        "client": "failed"
+      },
+      {
+        "server": "abandoned",
+        "client": "canceled"
+      },
+      {
+        "server": "refunded",
+        "client": "completed"
+      },
+      {
+        "server": "chargedback",
+        "client": "completed"
+      }
+    ],
+    "unrecognized_fallback": "processing"
+  },
+  "http_helpers": {
+    "retry_after": [
+      {
+        "name": "missing",
+        "header": null,
+        "now_ms": 1700000000000,
+        "seconds": null
+      },
+      {
+        "name": "blank",
+        "header": "   ",
+        "now_ms": 1700000000000,
+        "seconds": null
+      },
+      {
+        "name": "zero",
+        "header": "0",
+        "now_ms": 1700000000000,
+        "seconds": 0
+      },
+      {
+        "name": "trimmed_delta_seconds",
+        "header": " 12 ",
+        "now_ms": 1700000000000,
+        "seconds": 12
+      },
+      {
+        "name": "negative_numeric_junk",
+        "header": "-1",
+        "now_ms": 1700000000000,
+        "seconds": null
+      },
+      {
+        "name": "fractional_numeric_junk",
+        "header": "1.5",
+        "now_ms": 1700000000000,
+        "seconds": null
+      },
+      {
+        "name": "invalid",
+        "header": "not-a-date",
+        "now_ms": 1700000000000,
+        "seconds": null
+      },
+      {
+        "name": "numeric_overflow",
+        "header": "9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999",
+        "now_ms": 1700000000000,
+        "seconds": null
+      },
+      {
+        "name": "future_http_date",
+        "header": "Tue, 14 Nov 2023 22:13:30 GMT",
+        "now_ms": 1700000000000,
+        "seconds": 10
+      },
+      {
+        "name": "past_http_date",
+        "header": "Tue, 14 Nov 2023 22:13:10 GMT",
+        "now_ms": 1700000000000,
+        "seconds": 0
+      }
+    ],
+    "loopback_hosts": [
+      {
+        "host": "localhost",
+        "loopback": true
+      },
+      {
+        "host": "LOCALHOST",
+        "loopback": true
+      },
+      {
+        "host": "::1",
+        "loopback": true
+      },
+      {
+        "host": "[::1]",
+        "loopback": true
+      },
+      {
+        "host": "127.0.0.1",
+        "loopback": true
+      },
+      {
+        "host": "127.255.255.255",
+        "loopback": true
+      },
+      {
+        "host": "127.0.0.256",
+        "loopback": false
+      },
+      {
+        "host": "127.0.0",
+        "loopback": false
+      },
+      {
+        "host": "2130706433",
+        "loopback": false
+      },
+      {
+        "host": "localhost.example",
+        "loopback": false
+      },
+      {
+        "host": "0:0:0:0:0:0:0:1",
+        "loopback": false
+      }
+    ],
+    "loopback_urls": [
+      {
+        "name": "https_vendor",
+        "url": "https://vendor.example/checkout",
+        "allowed": true
+      },
+      {
+        "name": "loopback_userinfo",
+        "url": "http://user@127.0.0.1:8090/checkout",
+        "allowed": true
+      },
+      {
+        "name": "bracketed_ipv6_with_port",
+        "url": "http://[::1]:8090/checkout",
+        "allowed": true
+      },
+      {
+        "name": "percent_encoded_loopback",
+        "url": "http://%31%32%37%2e0%2e0%2e1/checkout",
+        "allowed": false
+      },
+      {
+        "name": "numeric_loopback",
+        "url": "http://2130706433/checkout",
+        "allowed": false
+      },
+      {
+        "name": "shortened_loopback",
+        "url": "http://127.0.0/checkout",
+        "allowed": false
+      },
+      {
+        "name": "loopback_as_userinfo",
+        "url": "http://127.0.0.1@evil.example/checkout",
+        "allowed": false
+      },
+      {
+        "name": "multiple_userinfo_separators",
+        "url": "http://user@evil.example@127.0.0.1/checkout",
+        "allowed": false
+      },
+      {
+        "name": "malformed_ipv6_authority",
+        "url": "http://[::1]evil.example/checkout",
+        "allowed": false
+      }
+    ]
+  },
+  "checkout_helpers": {
+    "return_classification": [
+      {
+        "name": "success_exact",
+        "return_url": "mygame://checkout/return",
+        "success_url": "mygame://checkout/return",
+        "cancel_url": "mygame://checkout/cancel",
+        "expected_request_id": "req 123",
+        "verdict": "success",
+        "request_id": "req 123",
+        "error": null
+      },
+      {
+        "name": "cancel_exact",
+        "return_url": "mygame://checkout/cancel",
+        "success_url": "mygame://checkout/return",
+        "cancel_url": "mygame://checkout/cancel",
+        "expected_request_id": "req 123",
+        "verdict": "cancel",
+        "request_id": "req 123",
+        "error": null
+      },
+      {
+        "name": "cancel_precedes_overlapping_success",
+        "return_url": "mygame://checkout/cancel/confirmed?request_id=req%20123",
+        "success_url": "mygame://checkout",
+        "cancel_url": "mygame://checkout/cancel",
+        "expected_request_id": "req 123",
+        "verdict": "cancel",
+        "request_id": "req 123",
+        "error": null
+      },
+      {
+        "name": "query_fragment_and_trailing_slash_ignored",
+        "return_url": "mygame://checkout/return/?request_id=req%20123#done",
+        "success_url": "mygame://checkout/return",
+        "cancel_url": "mygame://checkout/cancel",
+        "expected_request_id": "req 123",
+        "verdict": "success",
+        "request_id": "req 123",
+        "error": null
+      },
+      {
+        "name": "child_path_segment",
+        "return_url": "mygame://checkout/return/complete",
+        "success_url": "mygame://checkout/return",
+        "cancel_url": "mygame://checkout/cancel",
+        "expected_request_id": "req 123",
+        "verdict": "success",
+        "request_id": "req 123",
+        "error": null
+      },
+      {
+        "name": "path_prefix_without_segment_boundary",
+        "return_url": "mygame://checkout/returning",
+        "success_url": "mygame://checkout/return",
+        "cancel_url": "mygame://checkout/cancel",
+        "expected_request_id": "req 123",
+        "verdict": "unknown",
+        "request_id": null,
+        "error": null
+      },
+      {
+        "name": "unrelated_path_ignores_request_id",
+        "return_url": "mygame://profile?request_id=other",
+        "success_url": "mygame://checkout/return",
+        "cancel_url": "mygame://checkout/cancel",
+        "expected_request_id": "req 123",
+        "verdict": "unknown",
+        "request_id": "other",
+        "error": null
+      },
+      {
+        "name": "percent_encoded_request_id",
+        "return_url": "mygame://checkout/return?request_id=req%20123",
+        "success_url": "mygame://checkout/return",
+        "cancel_url": "mygame://checkout/cancel",
+        "expected_request_id": "req 123",
+        "verdict": "success",
+        "request_id": "req 123",
+        "error": null
+      },
+      {
+        "name": "request_id_mismatch",
+        "return_url": "mygame://checkout/return?request_id=other",
+        "success_url": "mygame://checkout/return",
+        "cancel_url": "mygame://checkout/cancel",
+        "expected_request_id": "req 123",
+        "verdict": "unknown",
+        "request_id": "other",
+        "error": "request_id_mismatch"
+      },
+      {
+        "name": "request_id_case_mismatch",
+        "return_url": "mygame://checkout/return?request_id=REQ%20123",
+        "success_url": "mygame://checkout/return",
+        "cancel_url": "mygame://checkout/cancel",
+        "expected_request_id": "req 123",
+        "verdict": "unknown",
+        "request_id": "REQ 123",
+        "error": "request_id_mismatch"
+      },
+      {
+        "name": "path_case_mismatch",
+        "return_url": "mygame://checkout/Return?request_id=req%20123",
+        "success_url": "mygame://checkout/return",
+        "cancel_url": "mygame://checkout/cancel",
+        "expected_request_id": "req 123",
+        "verdict": "unknown",
+        "request_id": "req 123",
+        "error": null
+      },
+      {
+        "name": "https_universal_link",
+        "return_url": "https://merchant.example/checkout/return?request_id=req%20123",
+        "success_url": "https://merchant.example/checkout/return",
+        "cancel_url": "https://merchant.example/checkout/cancel",
+        "expected_request_id": "req 123",
+        "verdict": "success",
+        "request_id": "req 123",
+        "error": null
+      },
+      {
+        "name": "malformed_return_url",
+        "return_url": "://not-a-url",
+        "success_url": "mygame://checkout/return",
+        "cancel_url": "mygame://checkout/cancel",
+        "expected_request_id": "req 123",
+        "verdict": "unknown",
+        "request_id": null,
+        "error": "malformed_url"
+      }
+    ],
+    "return_url_pairs": [
+      {
+        "name": "distinct_siblings",
+        "success_url": "mygame://checkout/return",
+        "cancel_url": "mygame://checkout/cancel",
+        "valid": true
+      },
+      {
+        "name": "success_parent_cancel_child",
+        "success_url": "mygame://checkout",
+        "cancel_url": "mygame://checkout/cancel",
+        "valid": true
+      },
+      {
+        "name": "same_normalized_path",
+        "success_url": "mygame://checkout/return/",
+        "cancel_url": "mygame://checkout/return",
+        "valid": false
+      },
+      {
+        "name": "query_fragment_only_difference",
+        "success_url": "mygame://checkout/return?outcome=success",
+        "cancel_url": "mygame://checkout/return?outcome=cancel#done",
+        "valid": false
+      },
+      {
+        "name": "cancel_parent_of_success",
+        "success_url": "mygame://checkout/return/complete",
+        "cancel_url": "mygame://checkout/return",
+        "valid": false
+      }
+    ],
+    "http_error_mapping": [
+      {
+        "name": "invalid_request",
+        "status": 400,
+        "body": "{\"error\":\"invalid request\"}",
+        "code": "InvalidRequest"
+      },
+      {
+        "name": "authentication_failed",
+        "status": 401,
+        "body": "{\"error\":\"invalid API key\"}",
+        "code": "AuthenticationFailed"
+      },
+      {
+        "name": "suspended_json",
+        "status": 403,
+        "body": "{\"error\":\"account suspended\"}",
+        "code": "AccountSuspended"
+      },
+      {
+        "name": "suspended_case_insensitive",
+        "status": 403,
+        "body": "{\"error\":\"Account SUSPENDED by administrator\"}",
+        "code": "AccountSuspended"
+      },
+      {
+        "name": "origin_denied_json",
+        "status": 403,
+        "body": "{\"error\":\"origin not allowed\"}",
+        "code": "OriginNotAllowed"
+      },
+      {
+        "name": "unparseable_forbidden",
+        "status": 403,
+        "body": "forbidden",
+        "code": "OriginNotAllowed"
+      },
+      {
+        "name": "not_found",
+        "status": 404,
+        "body": "{\"error\":\"not found\"}",
+        "code": "NoVendorsAvailable"
+      },
+      {
+        "name": "rate_limited",
+        "status": 429,
+        "body": "{\"error\":\"rate limited\"}",
+        "code": "RateLimited"
+      },
+      {
+        "name": "service_unavailable",
+        "status": 503,
+        "body": "{\"error\":\"try later\"}",
+        "code": "ServiceUnavailable"
+      },
+      {
+        "name": "unknown_status",
+        "status": 418,
+        "body": "{\"error\":\"teapot\"}",
+        "code": "Unknown"
+      }
+    ],
+    "status_precedence": [
+      {
+        "name": "sequenced_newer",
+        "candidate_event_sequence": 2,
+        "current_event_sequence": 1,
+        "candidate_event_timestamp": "2026-06-18T09:59:59Z",
+        "current_event_timestamp": "2026-06-18T10:00:00Z",
+        "candidate_applies": true
+      },
+      {
+        "name": "sequenced_equal_redelivery",
+        "candidate_event_sequence": 2,
+        "current_event_sequence": 2,
+        "candidate_event_timestamp": "2026-06-18T09:59:59Z",
+        "current_event_timestamp": "2026-06-18T10:00:00Z",
+        "candidate_applies": true
+      },
+      {
+        "name": "sequenced_older",
+        "candidate_event_sequence": 1,
+        "current_event_sequence": 2,
+        "candidate_event_timestamp": "2026-06-18T10:00:01Z",
+        "current_event_timestamp": "2026-06-18T10:00:00Z",
+        "candidate_applies": false
+      },
+      {
+        "name": "sequenced_candidate_supersedes_legacy",
+        "candidate_event_sequence": 1,
+        "current_event_sequence": null,
+        "candidate_event_timestamp": "2026-06-18T09:59:59Z",
+        "current_event_timestamp": "2026-06-18T10:00:00Z",
+        "candidate_applies": true
+      },
+      {
+        "name": "legacy_candidate_cannot_supersede_sequenced",
+        "candidate_event_sequence": null,
+        "current_event_sequence": 1,
+        "candidate_event_timestamp": "2026-06-18T10:00:01Z",
+        "current_event_timestamp": "2026-06-18T10:00:00Z",
+        "candidate_applies": false
+      },
+      {
+        "name": "legacy_timestamp_newer",
+        "candidate_event_sequence": null,
+        "current_event_sequence": null,
+        "candidate_event_timestamp": "2026-06-18T10:00:01Z",
+        "current_event_timestamp": "2026-06-18T10:00:00Z",
+        "candidate_applies": true
+      },
+      {
+        "name": "legacy_timestamp_equal_redelivery",
+        "candidate_event_sequence": null,
+        "current_event_sequence": null,
+        "candidate_event_timestamp": "2026-06-18T10:00:00Z",
+        "current_event_timestamp": "2026-06-18T10:00:00Z",
+        "candidate_applies": true
+      },
+      {
+        "name": "legacy_timestamp_older",
+        "candidate_event_sequence": null,
+        "current_event_sequence": null,
+        "candidate_event_timestamp": "2026-06-18T09:59:59Z",
+        "current_event_timestamp": "2026-06-18T10:00:00Z",
+        "candidate_applies": false
+      },
+      {
+        "name": "invalid_timestamp_uses_lexical_newer",
+        "candidate_event_sequence": null,
+        "current_event_sequence": null,
+        "candidate_event_timestamp": "z-invalid",
+        "current_event_timestamp": "2026-06-18T10:00:00Z",
+        "candidate_applies": true
+      },
+      {
+        "name": "invalid_timestamp_uses_lexical_older",
+        "candidate_event_sequence": null,
+        "current_event_sequence": null,
+        "candidate_event_timestamp": "2026-06-18T10:00:00Z",
+        "current_event_timestamp": "z-invalid",
+        "candidate_applies": false
+      }
+    ]
+  }
+}
