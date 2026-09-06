@@ -11,6 +11,7 @@ public enum M2CCheckoutErrorCode: String, Codable, Sendable {
     case serviceUnavailable
     case checkoutExpired
     case unknown
+    case sessionNotFound
 }
 
 public struct M2CCheckoutError: Error, LocalizedError, Sendable, Equatable {

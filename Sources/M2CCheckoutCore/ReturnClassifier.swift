@@ -75,8 +75,8 @@ public enum ReturnClassifier {
     }
 }
 
-enum ReturnURLMatcher {
-    static func matches(_ actual: URL, configured: URL) -> Bool {
+package enum ReturnURLMatcher {
+    package static func matches(_ actual: URL, configured: URL) -> Bool {
         guard
             let a = normalized(actual),
             let b = normalized(configured),

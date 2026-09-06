@@ -90,14 +90,42 @@ final class ConformanceTests: XCTestCase {
             }
         }
 
+        struct SessionStatusVector: Decodable {
+            struct Expected: Decodable {
+                let sessionID: String
+                let status: String
+                let completedPurchases: Int
+
+                enum CodingKeys: String, CodingKey {
+                    case sessionID = "session_id"
+                    case status
+                    case completedPurchases = "completed_purchases"
+                }
+            }
+
+            let name: String
+            let requestedSessionID: String
+            let responseJSON: String
+            let expected: Expected?
+            let error: Bool
+
+            enum CodingKeys: String, CodingKey {
+                case name, expected, error
+                case requestedSessionID = "requested_session_id"
+                case responseJSON = "response_json"
+            }
+        }
+
         let checkoutHelpers: CheckoutHelpers
         let httpHelpers: HTTPHelpers
         let statusCoercion: StatusCoercion
+        let sessionStatus: [SessionStatusVector]
 
         enum CodingKeys: String, CodingKey {
             case checkoutHelpers = "checkout_helpers"
             case httpHelpers = "http_helpers"
             case statusCoercion = "status_coercion"
+            case sessionStatus = "session_status"
         }
     }
 
@@ -159,6 +187,23 @@ final class ConformanceTests: XCTestCase {
             XCTAssertEqual(StatusCoercion.coerce(mapping.server).rawValue, mapping.client)
         }
         XCTAssertEqual(StatusCoercion.coerce("future-status").rawValue, vectors.unrecognizedFallback)
+    }
+
+    func testShopSessionStatusVectors() throws {
+        for vector in try fixture().sessionStatus {
+            do {
+                let result = try ShopSessionStatus.parse(
+                    response: Data(vector.responseJSON.utf8),
+                    requestedSessionID: vector.requestedSessionID
+                )
+                XCTAssertFalse(vector.error, vector.name)
+                XCTAssertEqual(result.sessionID, vector.expected?.sessionID, vector.name)
+                XCTAssertEqual(result.status.rawValue, vector.expected?.status, vector.name)
+                XCTAssertEqual(result.completedPurchases, vector.expected?.completedPurchases, vector.name)
+            } catch {
+                XCTAssertTrue(vector.error, vector.name)
+            }
+        }
     }
 
     private func absoluteURL(_ value: String) -> URL? {

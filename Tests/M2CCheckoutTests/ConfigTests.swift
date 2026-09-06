@@ -158,6 +158,32 @@ final class ConfigTests: XCTestCase {
         }
     }
 
+    func testPersistentPresentationRejectsTransitioningHost() async {
+        let host = DismissingCheckoutViewController()
+        let window = UIWindow(frame: UIScreen.main.bounds)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        let driver = TestSafariPresentationDriver()
+        let presenter = SystemBrowserPresenter(safariPresentationDriver: driver)
+
+        do {
+            _ = try await presenter.open(
+                checkoutURL: URL(string: "https://vendor.example/pay")!,
+                callbackURL: URL(string: "mygame://checkout/return")!,
+                mode: .inAppPersistent,
+                presentationContext: AttachedPresentationProvider(host: host),
+                onExposed: {}
+            )
+            XCTFail("expected presentation failure")
+        } catch let error as M2CCheckoutError {
+            XCTAssertEqual(error.code, .invalidRequest)
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+        XCTAssertNil(driver.capturedViewController)
+    }
+
     func testPersistentPresentationReconcilesSafariDismissalRace() async throws {
         try ProcessCoordinator.shared.begin()
         defer { ProcessCoordinator.shared.finish() }
@@ -307,6 +333,46 @@ final class ConfigTests: XCTestCase {
         XCTAssertFalse(driver.isPresented)
     }
 
+    func testPersistentPresentationRefusalFailsWithoutCompletion() async throws {
+        try ProcessCoordinator.shared.begin()
+        defer { ProcessCoordinator.shared.finish() }
+
+        let host = UIViewController()
+        let window = UIWindow(frame: UIScreen.main.bounds)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        let settled = expectation(description: "refused Safari presentation settled")
+        let driver = TestSafariPresentationDriver(
+            completesPresentation: false,
+            activatesPresentation: false
+        )
+        let presenter = SystemBrowserPresenter(safariPresentationDriver: driver)
+        let result = Task { @MainActor () -> Error? in
+            defer { settled.fulfill() }
+            do {
+                _ = try await presenter.open(
+                    checkoutURL: URL(string: "https://vendor.example/pay")!,
+                    callbackURL: URL(string: "mygame://checkout/return")!,
+                    mode: .inAppPersistent,
+                    presentationContext: AttachedPresentationProvider(host: host),
+                    onExposed: { XCTFail("refused presentation must not be exposed") }
+                )
+                return nil
+            } catch {
+                return error
+            }
+        }
+        await fulfillment(of: [settled], timeout: 2)
+        result.cancel()
+
+        let error = await result.value
+        XCTAssertEqual((error as? M2CCheckoutError)?.code, .invalidRequest)
+        let safari = try XCTUnwrap(driver.capturedViewController)
+        XCTAssertNil(safari.delegate)
+        XCTAssertFalse(driver.isPresented)
+    }
+
     func testPersistentPresentationSurvivesBackgroundAndForeground() async throws {
         try ProcessCoordinator.shared.begin()
         defer { ProcessCoordinator.shared.finish() }
@@ -408,9 +474,14 @@ private final class TestSafariPresentationDriver: SafariPresentationDriving {
     private(set) var isPresented = false
     var onPresentationAttempted: (() -> Void)?
     private let completesPresentation: Bool
+    private let activatesPresentation: Bool
 
-    init(completesPresentation: Bool = true) {
+    init(
+        completesPresentation: Bool = true,
+        activatesPresentation: Bool = true
+    ) {
         self.completesPresentation = completesPresentation
+        self.activatesPresentation = activatesPresentation
     }
 
     func present(
@@ -419,7 +490,7 @@ private final class TestSafariPresentationDriver: SafariPresentationDriving {
         completion: @escaping () -> Void
     ) {
         capturedViewController = controller
-        isPresented = true
+        isPresented = activatesPresentation
         onPresentationAttempted?()
         if completesPresentation {
             completion()
@@ -436,7 +507,19 @@ private final class TestSafariPresentationDriver: SafariPresentationDriving {
         completion?()
     }
 
+    func isPresentationActive(
+        _ controller: SFSafariViewController,
+        from host: UIViewController
+    ) -> Bool {
+        isPresented && controller === capturedViewController
+    }
+
     func recordUserDismissal() {
         isPresented = false
     }
+}
+
+@MainActor
+private final class DismissingCheckoutViewController: UIViewController {
+    override var isBeingDismissed: Bool { true }
 }

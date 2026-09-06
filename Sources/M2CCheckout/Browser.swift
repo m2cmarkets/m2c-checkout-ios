@@ -39,6 +39,226 @@ protocol BrowserPresenting: AnyObject {
 }
 
 @MainActor
+protocol ShopSessionBrowserPresenting: AnyObject {
+    func prepareLaunch(
+        mode: BrowserMode,
+        presenter: UIViewController?
+    ) throws
+
+    func launch(
+        shopURL: URL,
+        returnURL: URL?,
+        mode: BrowserMode,
+        presenter: UIViewController?
+    ) async throws
+}
+
+@MainActor
+final class SystemShopSessionBrowserPresenter: NSObject,
+    ShopSessionBrowserPresenting {
+    private static var activePresenter: SystemShopSessionBrowserPresenter?
+
+    private let safariPresentationDriver: SafariPresentationDriving
+    private var safariViewController: SFSafariViewController?
+    private weak var presentationHost: UIViewController?
+    private var returnURL: URL?
+    private var presentationCompleted = false
+    private var dismissAfterPresentation = false
+
+    override init() {
+        safariPresentationDriver = UIKitSafariPresentationDriver()
+        super.init()
+    }
+
+    init(safariPresentationDriver: SafariPresentationDriving) {
+        self.safariPresentationDriver = safariPresentationDriver
+        super.init()
+    }
+
+    func prepareLaunch(
+        mode: BrowserMode,
+        presenter: UIViewController?
+    ) throws {
+        if mode == .externalBrowser || presenter == nil { return }
+        try validateInAppPresentation(presenter)
+    }
+
+    func launch(
+        shopURL: URL,
+        returnURL: URL?,
+        mode: BrowserMode,
+        presenter: UIViewController?
+    ) async throws {
+        if mode == .externalBrowser || presenter == nil {
+            try await openExternal(shopURL)
+            return
+        }
+        try validateInAppPresentation(presenter)
+        guard let presenter else { return }
+        let controller = SFSafariViewController(url: shopURL)
+        controller.delegate = self
+        safariViewController = controller
+        presentationHost = presenter
+        self.returnURL = returnURL
+        Self.activePresenter = self
+        try await withCheckedThrowingContinuation { continuation in
+            let attempt = ShopSafariPresentationAttempt(continuation)
+            let presentationError = M2CCheckoutError(
+                .invalidRequest,
+                "shop browser could not be presented"
+            )
+            safariPresentationDriver.present(
+                controller,
+                from: presenter
+            ) { [weak self] in
+                guard let self,
+                      Self.activePresenter === self,
+                      self.safariViewController === controller else {
+                    attempt.succeed()
+                    return
+                }
+                guard self.safariPresentationDriver.isPresentationActive(
+                    controller,
+                    from: presenter
+                ) else {
+                    self.finishPresentation(dismiss: false)
+                    attempt.fail(presentationError)
+                    return
+                }
+                self.presentationCompleted = true
+                if self.dismissAfterPresentation {
+                    self.finishPresentation(dismiss: true)
+                }
+                attempt.succeed()
+            }
+            DispatchQueue.main.async { [weak self, weak controller, weak presenter] in
+                guard let self, let controller, let presenter,
+                      Self.activePresenter === self,
+                      self.safariViewController === controller else {
+                    attempt.succeed()
+                    return
+                }
+                guard !self.safariPresentationDriver.isPresentationActive(
+                    controller,
+                    from: presenter
+                ) else { return }
+                self.finishPresentation(dismiss: false)
+                attempt.fail(presentationError)
+            }
+        }
+    }
+
+    private func validateInAppPresentation(_ presenter: UIViewController?) throws {
+        if let activePresenter = Self.activePresenter,
+           activePresenter.presentationCompleted,
+           !activePresenter.isPresentationActive {
+            activePresenter.finishPresentation(dismiss: false)
+        }
+        guard let presenter,
+              presenter.viewIfLoaded?.window != nil,
+              presenter.presentedViewController == nil,
+              !presenter.isBeingPresented,
+              !presenter.isBeingDismissed,
+              presenter.transitionCoordinator == nil else {
+            throw M2CCheckoutError(
+                .invalidRequest,
+                "shop presentation view controller is not available"
+            )
+        }
+        guard Self.activePresenter == nil else {
+            throw M2CCheckoutError(
+                .invalidRequest,
+                "a shop browser is already presented"
+            )
+        }
+    }
+
+    private var isPresentationActive: Bool {
+        guard let controller = safariViewController,
+              let host = presentationHost,
+              host.viewIfLoaded?.window != nil else { return false }
+        return safariPresentationDriver.isPresentationActive(
+            controller,
+            from: host
+        )
+    }
+
+    static func handleOpenURL(_ url: URL) -> Bool {
+        guard let presenter = activePresenter,
+              let returnURL = presenter.returnURL,
+              ReturnURLMatcher.matches(url, configured: returnURL) else {
+            return false
+        }
+        if presenter.presentationCompleted {
+            presenter.finishPresentation(dismiss: true)
+        } else {
+            presenter.dismissAfterPresentation = true
+        }
+        return true
+    }
+
+    private func finishPresentation(dismiss: Bool) {
+        guard Self.activePresenter === self else { return }
+        Self.activePresenter = nil
+        returnURL = nil
+        presentationCompleted = false
+        dismissAfterPresentation = false
+        presentationHost = nil
+        let controller = safariViewController
+        safariViewController = nil
+        controller?.delegate = nil
+        if dismiss, let controller {
+            safariPresentationDriver.dismiss(
+                controller,
+                animated: true,
+                completion: nil
+            )
+        }
+    }
+
+    private func openExternal(_ url: URL) async throws {
+        let opened = await withCheckedContinuation { continuation in
+            UIApplication.shared.open(url, options: [:]) { success in
+                continuation.resume(returning: success)
+            }
+        }
+        guard opened else {
+            throw M2CCheckoutError(.network, "system browser could not open shop")
+        }
+    }
+}
+
+@MainActor
+private final class ShopSafariPresentationAttempt {
+    private var continuation: CheckedContinuation<Void, Error>?
+
+    init(_ continuation: CheckedContinuation<Void, Error>) {
+        self.continuation = continuation
+    }
+
+    func succeed() {
+        take()?.resume()
+    }
+
+    func fail(_ error: Error) {
+        take()?.resume(throwing: error)
+    }
+
+    private func take() -> CheckedContinuation<Void, Error>? {
+        let value = continuation
+        continuation = nil
+        return value
+    }
+}
+
+extension SystemShopSessionBrowserPresenter: @preconcurrency SFSafariViewControllerDelegate {
+    func safariViewControllerDidFinish(_ controller: SFSafariViewController) {
+        guard controller === safariViewController else { return }
+        finishPresentation(dismiss: false)
+    }
+}
+
+@MainActor
 protocol SafariPresentationDriving: AnyObject {
     func present(
         _ controller: SFSafariViewController,
@@ -51,6 +271,11 @@ protocol SafariPresentationDriving: AnyObject {
         animated: Bool,
         completion: (() -> Void)?
     )
+
+    func isPresentationActive(
+        _ controller: SFSafariViewController,
+        from host: UIViewController
+    ) -> Bool
 }
 
 @MainActor
@@ -73,6 +298,15 @@ private final class UIKitSafariPresentationDriver: SafariPresentationDriving {
             return
         }
         controller.dismiss(animated: animated, completion: completion)
+    }
+
+    func isPresentationActive(
+        _ controller: SFSafariViewController,
+        from host: UIViewController
+    ) -> Bool {
+        host.presentedViewController === controller ||
+            controller.presentingViewController != nil ||
+            controller.viewIfLoaded?.window != nil
     }
 }
 
@@ -198,19 +432,42 @@ final class SystemBrowserPresenter: NSObject, BrowserPresenting {
                 "checkout presentation view controller is already presenting content"
             )
         }
+        guard !host.isBeingPresented,
+              !host.isBeingDismissed,
+              host.transitionCoordinator == nil else {
+            throw M2CCheckoutError(
+                .invalidRequest,
+                "checkout presentation view controller is not available"
+            )
+        }
         return try await withCheckedThrowingContinuation { continuation in
             safariContinuation = continuation
             let controller = SFSafariViewController(url: checkoutURL)
             controller.delegate = self
             safariViewController = controller
+            let presentationError = M2CCheckoutError(
+                .invalidRequest,
+                "checkout browser could not be presented"
+            )
             ProcessCoordinator.shared.beginInProcessBrowserPresentation()
             safariPresentationDriver.present(
                 controller,
                 from: host
-            ) { [weak self, weak controller] in
-                guard let self,
+            ) { [weak self, weak controller, weak host] in
+                guard let self, let controller,
                       self.safariViewController === controller,
                       self.safariContinuation != nil else { return }
+                guard let host else {
+                    self.settleSafari(.failure(presentationError), dismiss: false)
+                    return
+                }
+                guard self.safariPresentationDriver.isPresentationActive(
+                    controller,
+                    from: host
+                ) else {
+                    self.settleSafari(.failure(presentationError), dismiss: false)
+                    return
+                }
                 onExposed()
                 self.safariReturnTask = Task { @MainActor [weak self] in
                     var url = await ProcessCoordinator.shared.waitForReturn()
@@ -229,6 +486,20 @@ final class SystemBrowserPresenter: NSObject, BrowserPresenting {
                         dismiss: true
                     )
                 }
+            }
+            DispatchQueue.main.async { [weak self, weak controller, weak host] in
+                guard let self, let controller,
+                      self.safariViewController === controller,
+                      self.safariContinuation != nil else { return }
+                guard let host else {
+                    self.settleSafari(.failure(presentationError), dismiss: false)
+                    return
+                }
+                guard !self.safariPresentationDriver.isPresentationActive(
+                    controller,
+                    from: host
+                ) else { return }
+                self.settleSafari(.failure(presentationError), dismiss: false)
             }
         }
     }
@@ -262,6 +533,13 @@ final class SystemBrowserPresenter: NSObject, BrowserPresenting {
     }
 
     private func completeSafari(_ outcome: BrowserOutcome, dismiss: Bool) {
+        settleSafari(.success(outcome), dismiss: dismiss)
+    }
+
+    private func settleSafari(
+        _ result: Result<BrowserOutcome, Error>,
+        dismiss: Bool
+    ) {
         guard let continuation = safariContinuation else { return }
         safariContinuation = nil
         safariReturnTask?.cancel()
@@ -273,7 +551,7 @@ final class SystemBrowserPresenter: NSObject, BrowserPresenting {
         let controller = safariViewController
         safariViewController = nil
         controller?.delegate = nil
-        let settle = { continuation.resume(returning: outcome) }
+        let settle = { continuation.resume(with: result) }
         if dismiss, let controller {
             safariPresentationDriver.dismiss(controller, animated: true, completion: settle)
         } else {

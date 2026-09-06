@@ -1,6 +1,6 @@
 {
   "_comment": "Cross-SDK vectors. HMAC answers come from the Go server implementation; status and checkout helper tables are hand-maintained contracts. Do not hand-edit. Regenerate with: go test ./server/vendor/ -run TestKATFixture -update-kat. See sdk/kat/README.md.",
-  "schema_version": 4,
+  "schema_version": 5,
   "protocol": {
     "preimage": "timestamp + \"\\n\" + body",
     "signature_prefix": "sha256=",
@@ -242,6 +242,10 @@
         "client": "processing"
       },
       {
+        "server": "expired",
+        "client": "processing"
+      },
+      {
         "server": "completed",
         "client": "completed"
       },
@@ -264,6 +268,129 @@
     ],
     "unrecognized_fallback": "processing"
   },
+  "session_status": [
+    {
+      "name": "active_zero",
+      "requested_session_id": "550e8400-e29b-41d4-a716-446655440000",
+      "response_json": "{\"session_id\":\"550e8400-e29b-41d4-a716-446655440000\",\"status\":\"active\",\"completed_purchases\":0}",
+      "expected": {
+        "session_id": "550e8400-e29b-41d4-a716-446655440000",
+        "status": "active",
+        "completed_purchases": 0
+      },
+      "error": false
+    },
+    {
+      "name": "expired_with_purchases",
+      "requested_session_id": "550e8400-e29b-41d4-a716-446655440000",
+      "response_json": "{\"session_id\":\"550e8400-e29b-41d4-a716-446655440000\",\"status\":\"expired\",\"completed_purchases\":7}",
+      "expected": {
+        "session_id": "550e8400-e29b-41d4-a716-446655440000",
+        "status": "expired",
+        "completed_purchases": 7
+      },
+      "error": false
+    },
+    {
+      "name": "uppercase_request_canonicalized",
+      "requested_session_id": "550E8400-E29B-41D4-A716-446655440000",
+      "response_json": "{\"session_id\":\"550e8400-e29b-41d4-a716-446655440000\",\"status\":\"active\",\"completed_purchases\":0}",
+      "expected": {
+        "session_id": "550e8400-e29b-41d4-a716-446655440000",
+        "status": "active",
+        "completed_purchases": 0
+      },
+      "error": false
+    },
+    {
+      "name": "unknown_status",
+      "requested_session_id": "550e8400-e29b-41d4-a716-446655440000",
+      "response_json": "{\"session_id\":\"550e8400-e29b-41d4-a716-446655440000\",\"status\":\"pending\",\"completed_purchases\":0}",
+      "expected": null,
+      "error": true
+    },
+    {
+      "name": "missing_status",
+      "requested_session_id": "550e8400-e29b-41d4-a716-446655440000",
+      "response_json": "{\"session_id\":\"550e8400-e29b-41d4-a716-446655440000\",\"completed_purchases\":0}",
+      "expected": null,
+      "error": true
+    },
+    {
+      "name": "missing_completed_purchases",
+      "requested_session_id": "550e8400-e29b-41d4-a716-446655440000",
+      "response_json": "{\"session_id\":\"550e8400-e29b-41d4-a716-446655440000\",\"status\":\"active\"}",
+      "expected": null,
+      "error": true
+    },
+    {
+      "name": "nested_completed_purchases_is_not_top_level",
+      "requested_session_id": "550e8400-e29b-41d4-a716-446655440000",
+      "response_json": "{\"session_id\":\"550e8400-e29b-41d4-a716-446655440000\",\"status\":\"active\",\"future\":{\"completed_purchases\":7}}",
+      "expected": null,
+      "error": true
+    },
+    {
+      "name": "string_completed_purchases",
+      "requested_session_id": "550e8400-e29b-41d4-a716-446655440000",
+      "response_json": "{\"session_id\":\"550e8400-e29b-41d4-a716-446655440000\",\"status\":\"active\",\"completed_purchases\":\"2\"}",
+      "expected": null,
+      "error": true
+    },
+    {
+      "name": "fractional_completed_purchases",
+      "requested_session_id": "550e8400-e29b-41d4-a716-446655440000",
+      "response_json": "{\"session_id\":\"550e8400-e29b-41d4-a716-446655440000\",\"status\":\"active\",\"completed_purchases\":1.5}",
+      "expected": null,
+      "error": true
+    },
+    {
+      "name": "negative_completed_purchases",
+      "requested_session_id": "550e8400-e29b-41d4-a716-446655440000",
+      "response_json": "{\"session_id\":\"550e8400-e29b-41d4-a716-446655440000\",\"status\":\"active\",\"completed_purchases\":-1}",
+      "expected": null,
+      "error": true
+    },
+    {
+      "name": "overflow_completed_purchases",
+      "requested_session_id": "550e8400-e29b-41d4-a716-446655440000",
+      "response_json": "{\"session_id\":\"550e8400-e29b-41d4-a716-446655440000\",\"status\":\"active\",\"completed_purchases\":2147483648}",
+      "expected": null,
+      "error": true
+    },
+    {
+      "name": "extra_fields_tolerated",
+      "requested_session_id": "550e8400-e29b-41d4-a716-446655440000",
+      "response_json": "{\"session_id\":\"550e8400-e29b-41d4-a716-446655440000\",\"status\":\"active\",\"completed_purchases\":0,\"future\":true}",
+      "expected": {
+        "session_id": "550e8400-e29b-41d4-a716-446655440000",
+        "status": "active",
+        "completed_purchases": 0
+      },
+      "error": false
+    },
+    {
+      "name": "missing_session_id",
+      "requested_session_id": "550e8400-e29b-41d4-a716-446655440000",
+      "response_json": "{\"status\":\"active\",\"completed_purchases\":0}",
+      "expected": null,
+      "error": true
+    },
+    {
+      "name": "malformed_session_id",
+      "requested_session_id": "550e8400-e29b-41d4-a716-446655440000",
+      "response_json": "{\"session_id\":\"not-a-uuid\",\"status\":\"active\",\"completed_purchases\":0}",
+      "expected": null,
+      "error": true
+    },
+    {
+      "name": "different_session_id",
+      "requested_session_id": "550e8400-e29b-41d4-a716-446655440000",
+      "response_json": "{\"session_id\":\"11111111-1111-4111-8111-111111111111\",\"status\":\"active\",\"completed_purchases\":0}",
+      "expected": null,
+      "error": true
+    }
+  ],
   "http_helpers": {
     "retry_after": [
       {

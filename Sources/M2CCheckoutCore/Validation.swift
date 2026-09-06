@@ -106,4 +106,18 @@ public enum CheckoutValidation {
             throw M2CCheckoutError(.invalidRequest, "segments are invalid")
         }
     }
+
+    public static func validateShopSessionRequest(_ request: ShopSessionRequest) throws {
+        guard !request.currency.isEmpty else {
+            throw M2CCheckoutError(.invalidRequest, "currency must be non-empty")
+        }
+        if let language = request.language, language.utf8.count > 64 {
+            throw M2CCheckoutError(.invalidRequest, "language is too long")
+        }
+        if let segments = request.segments,
+           segments.count > 20 || segments.contains(where: { $0.utf8.count > 128 }) {
+            throw M2CCheckoutError(.invalidRequest, "segments are invalid")
+        }
+        if let returnURL = request.returnURL { try validateReturnURL(returnURL) }
+    }
 }

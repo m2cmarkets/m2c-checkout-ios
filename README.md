@@ -1,12 +1,17 @@
 # M2C Checkout for iOS
 
+Shop sessions use the sibling `M2CShopSessionClient`. They create one vendor
+storefront browsing session, launch it without waiting for a return, and offer
+an optional one-shot status read. Purchases remain authoritative through your
+signed merchant webhook.
+
 `M2CCheckout` is the headless iOS checkout SDK. It supports backend-created
 checkout sessions and mobile publishable-key auctions on iOS 14 and newer.
 Add `https://github.com/m2cmarkets/m2c-checkout-ios.git` in Swift Package
 Manager, select the `M2CCheckout` product, choose a released semantic version,
 and import `M2CCheckout`.
 
-Current version: `0.8.1`.
+Current version: `0.9.0`.
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for the complete dashboard, return-routing,
 status-endpoint, release-build, and TestFlight or App Store deployment setup.
@@ -77,7 +82,58 @@ Call `tryResume()` after recreating the client at app launch. A pending recovery
 must be resumed before `start`; a new start fails with `invalidRequest` instead
 of replacing the earlier checkout record.
 
-## Browser modes
+## Shop sessions
+
+```swift
+let sessions = try M2CShopSessionClient(
+    config: M2CSessionConfig(publishableKey: "pub_test_...")
+)
+
+do {
+    let handle = try await sessions.startShopSession(
+        ShopSessionRequest(
+            currency: "USD",
+            returnURL: URL(string: "mygame://shop/closed")
+        ),
+        from: presentingViewController
+    )
+    let status = try await sessions.readShopSessionStatus(sessionID: handle.sessionID)
+    print("\(status.completedPurchases) purchases reported")
+} catch let error as M2CCheckoutError {
+    // Show the game's built-in store as the natural fallback.
+}
+```
+
+Forward the session return from the app or scene delegate. A matching return
+dismisses the SDK-owned in-app Safari controller. It is not classified as a
+purchase result.
+
+```swift
+M2CShopSessionClient.handleOpenURL(url)
+M2CShopSessionClient.handleUserActivity(userActivity)
+```
+
+For live sessions, M2C forwards the normalized `segments` and `returnURL` values
+verbatim to every eligible bidding vendor, not only the winner. Treat every
+eligible vendor as a third-party recipient. Never include personal or sensitive
+customer attributes, secrets, or session tokens in either field, and keep the
+return URL token-free.
+If you provide a custom-scheme URL, register its scheme on the mobile
+publishable key and in your app target. The SDK does not classify it as success
+or cancel and does not refresh status automatically. After forwarding the link,
+refresh entitlements from your backend. Use a route distinct from checkout
+returns. A session-only integration does not need checkout return URLs, polling,
+persistence, or fallback configuration.
+
+Shop-session browser behavior differs from the checkout return flow described
+below. With a presenter, both `.inAppPreferred` and `.inAppPersistent` use
+`SFSafariViewController`, whose browser-managed vendor state is not guaranteed
+to be ephemeral. With no presenter, either mode opens the default browser.
+`.externalBrowser` always opens the default browser. The SDK cannot read or
+manipulate browser-managed data, so test the vendor and device combinations you
+intend to support.
+
+## Checkout browser modes
 
 | Mode | iOS surface | Browser state |
 |---|---|---|

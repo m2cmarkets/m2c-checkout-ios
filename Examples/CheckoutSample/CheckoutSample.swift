@@ -14,9 +14,11 @@ struct CheckoutSampleApp: App {
         WindowGroup {
             CheckoutView()
                 .onOpenURL {
+                    guard !M2CShopSessionClient.handleOpenURL($0) else { return }
                     M2CCheckoutClient.handleOpenURL($0, returnURLs: sampleReturnURLs)
                 }
                 .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) {
+                    guard !M2CShopSessionClient.handleUserActivity($0) else { return }
                     M2CCheckoutClient.handleUserActivity(
                         $0,
                         returnURLs: sampleReturnURLs
@@ -40,6 +42,7 @@ private final class SampleModel: NSObject, ObservableObject,
     private var client: M2CCheckoutClient?
     private var stateTask: Task<Void, Never>?
     private var lastRequestID: String?
+    private var lastSessionID: String?
 
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
         checkoutPresentingViewController?.view.window ?? ASPresentationAnchor()
@@ -86,6 +89,40 @@ private final class SampleModel: NSObject, ObservableObject,
             let client = try self.makeClient(fallbackEnabled: false)
             let status = try await client.checkStatus(requestID: requestID)
             self.append("status \(requestID) -> \(status.rawValue)")
+        }
+    }
+
+    func startShopSession() {
+        run {
+            let client = try M2CShopSessionClient(
+                config: M2CSessionConfig(
+                    publishableKey: self.publishableKey,
+                    browserMode: self.persistentBrowser ? .inAppPersistent : .inAppPreferred
+                )
+            )
+            let handle = try await client.startShopSession(
+                ShopSessionRequest(
+                    currency: self.currency,
+                    returnURL: URL(string: "m2csample://shop/closed")
+                ),
+                from: self.checkoutPresentingViewController
+            )
+            self.lastSessionID = handle.sessionID
+            self.append("shop session \(handle.sessionID)")
+        }
+    }
+
+    func refreshShopSession() {
+        guard let sessionID = lastSessionID else {
+            append("No shop session to check")
+            return
+        }
+        run {
+            let client = try M2CShopSessionClient(
+                config: M2CSessionConfig(publishableKey: self.publishableKey)
+            )
+            let status = try await client.readShopSessionStatus(sessionID: sessionID)
+            self.append("shop \(status.status.rawValue): \(status.completedPurchases) purchases")
         }
     }
 
@@ -178,6 +215,8 @@ private struct CheckoutView: View {
                 Button("Fallback test") { model.start(fallbackEnabled: true) }
                 Button("Try resume") { model.resume() }
                 Button("Check status") { model.checkStatus() }
+                Button("Open shop session") { model.startShopSession() }
+                Button("Refresh shop status") { model.refreshShopSession() }
                 Button("Clear log") { model.clearLog() }
             }
             .disabled(model.busy)

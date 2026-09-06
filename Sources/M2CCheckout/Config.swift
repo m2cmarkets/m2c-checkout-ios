@@ -9,6 +9,19 @@ public enum BrowserMode: Sendable, Equatable {
     case externalBrowser
 }
 
+public struct M2CSessionConfig: Sendable {
+    public let publishableKey: String
+    public let browserMode: BrowserMode
+
+    public init(
+        publishableKey: String,
+        browserMode: BrowserMode = .inAppPreferred
+    ) {
+        self.publishableKey = publishableKey
+        self.browserMode = browserMode
+    }
+}
+
 @MainActor
 public protocol M2CCheckoutPresentationContextProviding:
     AnyObject, ASWebAuthenticationPresentationContextProviding {

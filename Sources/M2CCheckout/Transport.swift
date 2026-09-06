@@ -13,6 +13,38 @@ protocol CheckoutTransporting: AnyObject, Sendable {
     ) async throws -> CheckoutSession
     func readM2CStatus(requestID: String, publishableKey: String) async throws -> ClientStatus
     func readURLStatus(template: String, requestID: String) async throws -> ClientStatus
+    func createSession(
+        request: ShopSessionRequest,
+        publishableKey: String
+    ) async throws -> CreatedShopSession
+    func readSessionStatus(
+        sessionID: String,
+        publishableKey: String
+    ) async throws -> ShopSessionStatus
+}
+
+struct CreatedShopSession: Sendable {
+    let sessionID: String
+    let sessionExpiresAt: Date
+    let shopURLExpiresAt: Date
+    let shopURL: URL
+    let ttl: TimeInterval
+}
+
+extension CheckoutTransporting {
+    func createSession(
+        request: ShopSessionRequest,
+        publishableKey: String
+    ) async throws -> CreatedShopSession {
+        throw M2CCheckoutError(.unknown, "shop session transport is not implemented")
+    }
+
+    func readSessionStatus(
+        sessionID: String,
+        publishableKey: String
+    ) async throws -> ShopSessionStatus {
+        throw M2CCheckoutError(.unknown, "shop session transport is not implemented")
+    }
 }
 
 final class CheckoutTransport: CheckoutTransporting, @unchecked Sendable {
@@ -141,6 +173,132 @@ final class CheckoutTransport: CheckoutTransporting, @unchecked Sendable {
         let status = (try? JSONSerialization.jsonObject(with: data))
             .flatMap { $0 as? [String: Any] }?["status"] as? String
         return StatusCoercion.coerce(status ?? "")
+    }
+
+    func createSession(
+        request: ShopSessionRequest,
+        publishableKey: String
+    ) async throws -> CreatedShopSession {
+        try CheckoutValidation.validateShopSessionRequest(request)
+        let body = ShopSessionWireRequest(
+            currency: request.currency,
+            language: request.language,
+            segments: request.segments,
+            returnURL: request.returnURL?.absoluteString
+        )
+        var urlRequest = URLRequest(url: baseURL.appendingPathComponent("api/v1/session"))
+        urlRequest.httpMethod = "POST"
+        urlRequest.timeoutInterval = 30
+        urlRequest.httpShouldHandleCookies = false
+        urlRequest.httpBody = try JSONEncoder().encode(body)
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.setValue(publishableKey, forHTTPHeaderField: "X-API-Key")
+        let (data, response) = try await send(urlRequest)
+        guard response.statusCode == 200 else {
+            let retryAfter = RetryAfterParser.parse(response.value(forHTTPHeaderField: "Retry-After"))
+            if response.statusCode == 409 {
+                let mapped = HTTPErrorMapper.map(status: 400, body: data)
+                throw M2CCheckoutError(
+                    .invalidRequest,
+                    mapped.message,
+                    httpStatus: 409
+                )
+            }
+            throw HTTPErrorMapper.map(
+                status: response.statusCode,
+                body: data,
+                retryAfter: retryAfter
+            )
+        }
+        let wire: ShopSessionWireResponse
+        do {
+            wire = try JSONDecoder().decode(ShopSessionWireResponse.self, from: data)
+        } catch {
+            throw M2CCheckoutError(.unknown, "session response had an unexpected shape")
+        }
+        let sessionID: String
+        do {
+            sessionID = try ShopSessionStatus.canonicalSessionID(wire.sessionID)
+        } catch {
+            throw M2CCheckoutError(.unknown, "session response had an unexpected shape")
+        }
+        guard wire.winner.ttl >= 60, wire.winner.ttl <= 3_600,
+              let sessionExpiresAt = Self.parseRFC3339(wire.expiresAt),
+              let shopURLExpiresAt = Self.parseRFC3339(wire.winner.launchExpiresAt),
+              let shopURL = URL(string: wire.winner.shopURL) else {
+            throw M2CCheckoutError(.unknown, "session response had an unexpected shape")
+        }
+        do {
+            try CheckoutValidation.validateCheckoutURL(shopURL)
+        } catch {
+            throw M2CCheckoutError(.unknown, "session response had an unexpected shape")
+        }
+        return CreatedShopSession(
+            sessionID: sessionID,
+            sessionExpiresAt: sessionExpiresAt,
+            shopURLExpiresAt: shopURLExpiresAt,
+            shopURL: shopURL,
+            ttl: TimeInterval(wire.winner.ttl)
+        )
+    }
+
+    func readSessionStatus(
+        sessionID: String,
+        publishableKey: String
+    ) async throws -> ShopSessionStatus {
+        let canonical = try ShopSessionStatus.canonicalSessionID(sessionID)
+        var components = URLComponents(
+            url: baseURL.appendingPathComponent("api/v1/session-status"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [URLQueryItem(name: "session_id", value: canonical)]
+        var request = URLRequest(url: components.url!)
+        request.timeoutInterval = 30
+        request.setValue(publishableKey, forHTTPHeaderField: "X-API-Key")
+        let (data, response) = try await send(request)
+        if response.statusCode == 404 {
+            throw M2CCheckoutError(
+                .sessionNotFound,
+                "shop session was not found",
+                httpStatus: 404
+            )
+        }
+        guard response.statusCode == 200 else {
+            throw HTTPErrorMapper.map(
+                status: response.statusCode,
+                body: data,
+                retryAfter: RetryAfterParser.parse(
+                    response.value(forHTTPHeaderField: "Retry-After")
+                )
+            )
+        }
+        return try ShopSessionStatus.parse(response: data, requestedSessionID: canonical)
+    }
+
+    private static func parseRFC3339(_ value: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        guard let decimal = value.firstIndex(of: ".") else {
+            formatter.formatOptions = [.withInternetDateTime]
+            return formatter.date(from: value)
+        }
+        let fractionStart = value.index(after: decimal)
+        guard let zoneStart = value[fractionStart...].firstIndex(where: {
+            $0 == "Z" || $0 == "+" || $0 == "-"
+        }) else {
+            return nil
+        }
+        let fraction = value[fractionStart..<zoneStart]
+        guard (1...9).contains(fraction.count),
+              fraction.allSatisfy({ $0 >= "0" && $0 <= "9" }) else {
+            return nil
+        }
+        let milliseconds = String(fraction.prefix(3))
+            + String(repeating: "0", count: max(0, 3 - fraction.count))
+        let normalized = String(value[..<fractionStart])
+            + milliseconds
+            + String(value[zoneStart...])
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.date(from: normalized)
     }
 
     private func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
@@ -382,5 +540,44 @@ private struct StatusWireResponse: Decodable {
     enum CodingKeys: String, CodingKey {
         case requestID = "request_id"
         case status
+    }
+}
+
+private struct ShopSessionWireRequest: Encodable {
+    let currency: String
+    let language: String?
+    let segments: [String]?
+    let returnURL: String?
+    let deviceType = "mobile"
+    let platform = "ios"
+
+    enum CodingKeys: String, CodingKey {
+        case currency, language, segments, platform
+        case returnURL = "return_url"
+        case deviceType = "device_type"
+    }
+}
+
+private struct ShopSessionWireResponse: Decodable {
+    struct Winner: Decodable {
+        let shopURL: String
+        let ttl: Int
+        let launchExpiresAt: String
+
+        enum CodingKeys: String, CodingKey {
+            case shopURL = "shop_url"
+            case ttl
+            case launchExpiresAt = "launch_expires_at"
+        }
+    }
+
+    let winner: Winner
+    let sessionID: String
+    let expiresAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case winner
+        case sessionID = "session_id"
+        case expiresAt = "expires_at"
     }
 }

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.0 - 2026-08-30
+
+- Added `M2CShopSessionClient`, return-driven in-app Safari dismissal, immutable
+  session handles, and one-shot strict status reads.
+- Added the shared session-status vectors and `sessionNotFound` error code.
+
+## 0.8.2 - 2026-08-25
+
+- Aligned the checkout SDK release train and documented the browser-tab session
+  bridge. No native shop-session API was added.
+
 ## 0.8.1 - 2026-07-29
 
 - Removed the standalone support, security, and contribution documents and
