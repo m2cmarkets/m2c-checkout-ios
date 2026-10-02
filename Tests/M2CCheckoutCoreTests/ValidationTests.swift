@@ -12,6 +12,30 @@ final class ValidationTests: XCTestCase {
         )
     }
 
+    // Newer Foundation may percent-encode an extra userinfo @ while parsing, so
+    // the encoded form must be rejected like the raw one.
+    func testCheckoutURLLoopbackRejectsEncodedUserinfoSeparator() {
+        XCTAssertNoThrow(try CheckoutValidation.validateCheckoutURL(URL(string: "http://user@127.0.0.1:8090/x")!))
+        if let url = URL(string: "http://user%40evil.example@127.0.0.1/x") {
+            XCTAssertThrowsError(try CheckoutValidation.validateCheckoutURL(url))
+        }
+    }
+
+    func testAuctionReferenceMustBeOpaqueID() {
+        for reference in ["order_ABC-1.v2:eu", "  order-1  ", "   "] {
+            XCTAssertNoThrow(
+                try CheckoutValidation.validateRequest(AuctionRequest(transactionValue: 1, reference: reference))
+            )
+        }
+        for reference in ["jane@example.com", "Jane Doe", "https://shop.example/o/1", "caf\u{e9}", String(repeating: "x", count: 129)] {
+            XCTAssertThrowsError(
+                try CheckoutValidation.validateRequest(AuctionRequest(transactionValue: 1, reference: reference))
+            ) { error in
+                XCTAssertEqual((error as? M2CCheckoutError)?.code, .invalidRequest)
+            }
+        }
+    }
+
     func testPublishableKeyRejectsSecrets() {
         XCTAssertNoThrow(try CheckoutValidation.validatePublishableKey("pub_test_example"))
         XCTAssertThrowsError(try CheckoutValidation.validatePublishableKey("sk_secret"))

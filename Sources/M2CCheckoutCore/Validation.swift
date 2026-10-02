@@ -23,8 +23,40 @@ public enum CheckoutValidation {
             throw M2CCheckoutError(.invalidRequest, "checkout URL must be absolute")
         }
         if url.scheme?.lowercased() == "https" { return }
-        if url.scheme?.lowercased() == "http", isLoopbackHost(url.host ?? "") { return }
+        if url.scheme?.lowercased() == "http",
+           let host = rawAuthorityHost(url.absoluteString),
+           isLoopbackHost(host) { return }
         throw M2CCheckoutError(.invalidRequest, "checkout URL must use HTTPS")
+    }
+
+    // URL.host is percent-decoded, and Foundation's parser differs across OS
+    // releases, so the plain-HTTP loopback exception reads the host from the
+    // URL text. Only an explicit loopback spelling then qualifies, matching the
+    // other SDKs' validators.
+    private static func rawAuthorityHost(_ value: String) -> String? {
+        guard let schemeEnd = value.range(of: "://") else { return nil }
+        let rest = value[schemeEnd.upperBound...]
+        let authorityEnd = rest.firstIndex(where: { $0 == "/" || $0 == "?" || $0 == "#" }) ?? rest.endIndex
+        var authority = rest[..<authorityEnd]
+        if let at = authority.lastIndex(of: "@") {
+            // A second separator makes host selection parser-dependent. Check
+            // the %40 form too, because newer Foundation percent-encodes
+            // invalid characters when it parses the string.
+            let userinfo = authority[..<at]
+            if userinfo.firstIndex(of: "@") != nil
+                || userinfo.range(of: "%40", options: .caseInsensitive) != nil {
+                return nil
+            }
+            authority = authority[authority.index(after: at)...]
+        }
+        if authority.hasPrefix("[") {
+            guard let close = authority.firstIndex(of: "]") else { return nil }
+            let suffix = authority[authority.index(after: close)...]
+            guard suffix.isEmpty || suffix.hasPrefix(":") else { return nil }
+            return String(authority[authority.index(after: authority.startIndex)..<close])
+        }
+        let host = authority.lastIndex(of: ":").map { authority[..<$0] } ?? authority
+        return host.isEmpty ? nil : String(host)
     }
 
     public static func validateReturnURL(_ url: URL) throws {
@@ -95,8 +127,14 @@ public enum CheckoutValidation {
         if let description = request.description, description.utf8.count > 256 {
             throw M2CCheckoutError(.invalidRequest, "description is too long")
         }
-        if let reference = request.reference, reference.utf8.count > 512 {
-            throw M2CCheckoutError(.invalidRequest, "reference is too long")
+        if let reference = request.reference {
+            let trimmed = reference.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty && !isOpaqueReference(trimmed) {
+                throw M2CCheckoutError(
+                    .invalidRequest,
+                    "reference must be 1-128 characters of letters, digits, '.', '_', ':' or '-'"
+                )
+            }
         }
         if let referrer = request.referrer, referrer.utf8.count > 2_048 {
             throw M2CCheckoutError(.invalidRequest, "referrer is too long")
@@ -119,5 +157,16 @@ public enum CheckoutValidation {
             throw M2CCheckoutError(.invalidRequest, "segments are invalid")
         }
         if let returnURL = request.returnURL { try validateReturnURL(returnURL) }
+    }
+
+    // Mirrors the server's model.ValidReference: an opaque order or session ID,
+    // never an email, name, or URL.
+    static func isOpaqueReference(_ value: String) -> Bool {
+        guard (1...128).contains(value.utf8.count) else { return false }
+        return value.utf8.allSatisfy { byte in
+            (byte >= 0x30 && byte <= 0x39) || (byte >= 0x41 && byte <= 0x5A)
+                || (byte >= 0x61 && byte <= 0x7A)
+                || byte == 0x2E || byte == 0x5F || byte == 0x3A || byte == 0x2D
+        }
     }
 }

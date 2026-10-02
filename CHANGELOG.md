@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.10.0 - 2026-10-01
+
+- **Breaking:** `reference` must be an opaque ID: 1-128 ASCII letters, digits,
+  `.`, `_`, `:` or `-` after trimming. The SDK now rejects anything else
+  client-side instead of sending it; M2C rejects it with `400` either way.
+- **Breaking:** Plain-HTTP checkout URLs qualify for the loopback exception only
+  when the raw URL text names a loopback host. Percent-encoded hosts and URLs
+  with more than one userinfo separator are now rejected.
+- M2C now accepts only its fixed segment list (`new_customer`,
+  `returning_customer`, `guest`, `verified`, `subscriber`, `trial`, `lapsed`,
+  `high_value`) and reduces `referrer` to its origin. The SDK passes segments
+  through unchanged, so the list can grow without an SDK release.
+
 ## 0.9.0 - 2026-08-30
 
 - Added `M2CShopSessionClient`, return-driven in-app Safari dismissal, immutable

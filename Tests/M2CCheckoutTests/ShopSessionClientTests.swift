@@ -14,7 +14,7 @@ final class ShopSessionClientTests: XCTestCase {
         let request = ShopSessionRequest(
             currency: "USD",
             language: "en-US",
-            segments: ["returning"],
+            segments: ["returning_customer"],
             returnURL: URL(string: "mygame://shop/closed")
         )
         let created = createdSession()
@@ -438,7 +438,7 @@ final class ShopSessionClientTests: XCTestCase {
         let request = ShopSessionRequest(
             currency: "USD",
             language: "en-US",
-            segments: ["returning", "vip"],
+            segments: ["returning_customer", "subscriber"],
             returnURL: URL(string: "mygame://shop/closed")
         )
 
@@ -459,7 +459,7 @@ final class ShopSessionClientTests: XCTestCase {
         XCTAssertEqual(body["platform"] as? String, "ios")
         XCTAssertEqual(body["currency"] as? String, "USD")
         XCTAssertEqual(body["language"] as? String, "en-US")
-        XCTAssertEqual(body["segments"] as? [String], ["returning", "vip"])
+        XCTAssertEqual(body["segments"] as? [String], ["returning_customer", "subscriber"])
         XCTAssertEqual(body["return_url"] as? String, "mygame://shop/closed")
         XCTAssertEqual(created.sessionID, sessionID)
         XCTAssertEqual(created.sessionExpiresAt, Date(timeIntervalSince1970: 1_700_003_600))

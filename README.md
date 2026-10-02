@@ -11,7 +11,7 @@ Add `https://github.com/m2cmarkets/m2c-checkout-ios.git` in Swift Package
 Manager, select the `M2CCheckout` product, choose a released semantic version,
 and import `M2CCheckout`.
 
-Current version: `0.9.0`.
+Current version: `0.10.0`.
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for the complete dashboard, return-routing,
 status-endpoint, release-build, and TestFlight or App Store deployment setup.
@@ -114,10 +114,11 @@ M2CShopSessionClient.handleUserActivity(userActivity)
 ```
 
 For live sessions, M2C forwards the normalized `segments` and `returnURL` values
-verbatim to every eligible bidding vendor, not only the winner. Treat every
-eligible vendor as a third-party recipient. Never include personal or sensitive
-customer attributes, secrets, or session tokens in either field, and keep the
-return URL token-free.
+verbatim to every eligible bidding vendor, not only the winner. Segments must
+come from M2C's fixed list (`SupportedSegment` in `openapi.yaml`); any other
+value is rejected. Treat every eligible vendor as a third-party recipient.
+Never include personal or sensitive customer attributes, secrets, or session
+tokens in the return URL, and keep it token-free.
 If you provide a custom-scheme URL, register its scheme on the mobile
 publishable key and in your app target. The SDK does not classify it as success
 or cancel and does not refresh status automatically. After forwarding the link,

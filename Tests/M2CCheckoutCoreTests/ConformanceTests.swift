@@ -83,10 +83,25 @@ final class ConformanceTests: XCTestCase {
                 }
             }
 
+            struct LoopbackHostVector: Decodable {
+                let host: String
+                let loopback: Bool
+            }
+
+            struct LoopbackURLVector: Decodable {
+                let name: String
+                let url: String
+                let allowed: Bool
+            }
+
             let retryAfter: [RetryAfterVector]
+            let loopbackHosts: [LoopbackHostVector]
+            let loopbackURLs: [LoopbackURLVector]
 
             enum CodingKeys: String, CodingKey {
                 case retryAfter = "retry_after"
+                case loopbackHosts = "loopback_hosts"
+                case loopbackURLs = "loopback_urls"
             }
         }
 
@@ -181,6 +196,22 @@ final class ConformanceTests: XCTestCase {
         }
     }
 
+    func testLoopbackHostVectors() throws {
+        for vector in try fixture().httpHelpers.loopbackHosts {
+            XCTAssertEqual(CheckoutValidation.isLoopbackHost(vector.host), vector.loopback, vector.host)
+            let host = vector.host.contains(":") && !vector.host.hasPrefix("[")
+                ? "[" + vector.host + "]"
+                : vector.host
+            XCTAssertEqual(checkoutURLAllowed("http://" + host + "/checkout"), vector.loopback, vector.host)
+        }
+    }
+
+    func testLoopbackURLVectors() throws {
+        for vector in try fixture().httpHelpers.loopbackURLs {
+            XCTAssertEqual(checkoutURLAllowed(vector.url), vector.allowed, vector.name)
+        }
+    }
+
     func testStatusCoercionVectors() throws {
         let vectors = try fixture().statusCoercion
         for mapping in vectors.mappings {
@@ -203,6 +234,18 @@ final class ConformanceTests: XCTestCase {
             } catch {
                 XCTAssertTrue(vector.error, vector.name)
             }
+        }
+    }
+
+    // An authority Foundation refuses to parse cannot reach a checkout, so it
+    // counts as rejected, matching the other SDKs' validators.
+    private func checkoutURLAllowed(_ value: String) -> Bool {
+        guard let url = URL(string: value) else { return false }
+        do {
+            try CheckoutValidation.validateCheckoutURL(url)
+            return true
+        } catch {
+            return false
         }
     }
 
