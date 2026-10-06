@@ -63,6 +63,16 @@ public struct StatusPoller: Sendable {
     public func poll(
         read: @escaping @Sendable () async throws -> ClientStatus
     ) async throws -> ClientStatus {
+        try await pollWithBudget { budget in
+            try await self.readWithin(seconds: budget, read: read)
+        }
+    }
+
+    /// Schedules a resolver that bounds each actual read with `readOnce`. The supplied
+    /// budget includes primary and backstop reads without reserving another read permit.
+    public func pollWithBudget(
+        read: @escaping @Sendable (TimeInterval) async throws -> ClientStatus
+    ) async throws -> ClientStatus {
         try policy.validate()
         let window = policy.timeout
         let deadline = clock.now().addingTimeInterval(window)
@@ -79,7 +89,7 @@ public struct StatusPoller: Sendable {
             if remaining <= 0 { break }
             do {
                 try Task.checkCancellation()
-                let status = try await readWithin(seconds: remaining, read: read)
+                let status = try await read(remaining)
                 try Task.checkCancellation()
                 if status != .processing { return status }
             } catch let error as M2CCheckoutError
@@ -99,7 +109,7 @@ public struct StatusPoller: Sendable {
         do {
             try Task.checkCancellation()
             let finalBudget = min(30, max(0.001, window))
-            let status = try await readWithin(seconds: finalBudget, read: read)
+            let status = try await read(finalBudget)
             try Task.checkCancellation()
             return status
         } catch let error as M2CCheckoutError

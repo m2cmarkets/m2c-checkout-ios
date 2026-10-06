@@ -188,6 +188,11 @@ private final class SampleModel: NSObject, ObservableObject,
             lastRequestID = requestID
         }
         append("RESULT: \(String(describing: result))")
+        switch result {
+        case .canceled, .pendingTimeout:
+            append("Payment may still complete. Reconcile the original request on your backend before retrying this order.")
+        default: break
+        }
     }
 
     private func append(_ message: String) {

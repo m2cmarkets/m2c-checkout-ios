@@ -28,6 +28,13 @@ publishable key in the app. A secret key must stay on the merchant backend.
 Repeat this setup under **Live** before a production rollout. Keeping a separate
 mobile key per app and environment makes rotation and incident response clearer.
 
+For HTTPS checkout or shop-session return URLs, also add each exact origin
+(for example, `https://checkout.example.com`) under **Mobile return origins** on
+that mobile publishable key. Register the origin without a path, query, or
+fragment. Live keys require HTTPS; test keys additionally allow explicitly
+registered loopback HTTP origins. An empty list blocks HTTP(S) returns.
+This registration is separate from Universal Links and from the custom schemes.
+
 ## 2. Add the Swift package
 
 In Xcode, choose **File > Add Package Dependencies** and enter:

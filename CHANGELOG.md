@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.11.0 - 2026-10-05
+
+- Polling and recovery retain one read permit per primary or backstop request,
+  allowing healthy reads while earlier cancellation-insensitive reads finish.
+- Opt-in status backstops now handle retryable primary failures and saved URL
+  recovery. Short ambiguous-return polls reserve a bounded final backstop read.
+- Preserve primary results, actionable errors, task cancellation, and existing
+  recovery cleanup. Clarify reconciliation before retrying an uncertain payment.
+- Document registered mobile HTTP(S) return origins for checkout and shop sessions.
+
 ## 0.10.0 - 2026-10-01
 
 - **Breaking:** `reference` must be an opaque ID: 1-128 ASCII letters, digits,

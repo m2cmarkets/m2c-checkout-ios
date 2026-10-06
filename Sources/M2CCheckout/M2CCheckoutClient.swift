@@ -198,14 +198,11 @@ public final class M2CCheckoutClient {
                 }
             }
             let resumedAt = clock.now()
-            let poller = StatusPoller(
-                policy: config.poll,
-                clock: clock,
-                sleeper: sleeper
+            let status = try await pollStatus(
+                requestID: record.requestID,
+                checkoutStarted: resumedAt,
+                source: resumeStatusSource(record)
             )
-            let status = try await poller.poll {
-                try await self.readResumeStatus(record, checkoutStarted: resumedAt)
-            }
             return settle(status, requestID: record.requestID)
         } catch is CancellationError {
             throw CancellationError()
@@ -246,19 +243,13 @@ public final class M2CCheckoutClient {
         )
     }
 
-    private func readResumeStatus(
-        _ record: ResumeRecord,
-        checkoutStarted: Date
-    ) async throws -> ClientStatus {
+    private func resumeStatusSource(_ record: ResumeRecord) throws -> StatusSource {
         switch record.sourceKind {
         case .m2c:
-            guard let key = config.publishableKey else {
+            guard config.publishableKey != nil else {
                 throw M2CCheckoutError(.invalidRequest, "M2C resume requires a publishable key")
             }
-            return try await transport.readM2CStatus(
-                requestID: record.requestID,
-                publishableKey: key
-            )
+            return .m2c
         case .url:
             guard let template = record.statusURLTemplate else {
                 throw M2CCheckoutError(
@@ -267,10 +258,7 @@ public final class M2CCheckoutClient {
                 )
             }
             try CheckoutValidation.validateStatusTemplate(template)
-            return try await transport.readURLStatus(
-                template: template,
-                requestID: record.requestID
-            )
+            return .url(template: template)
         case .callback:
             guard case .callback(let callback) = config.statusSource else {
                 throw M2CCheckoutError(
@@ -278,20 +266,7 @@ public final class M2CCheckoutClient {
                     "resume requires the callback status source to be configured again"
                 )
             }
-            let primary = try await readCallback(callback, requestID: record.requestID)
-            guard primary == .processing,
-                  config.statusBackstop.enabled,
-                  let key = config.publishableKey,
-                  clock.now().timeIntervalSince(checkoutStarted) >=
-                    config.statusBackstop.threshold
-            else {
-                return primary
-            }
-            return try await readM2CBackstop(
-                requestID: record.requestID,
-                publishableKey: key,
-                primary: primary
-            )
+            return .callback(callback)
         }
     }
 
@@ -463,32 +438,52 @@ public final class M2CCheckoutClient {
         checkoutStarted: Date
     ) async throws -> CheckoutResult {
         transition(.polling)
-        let shortPoller = StatusPoller(
-            policy: PollPolicy(timeout: 3, delays: [0, 0.25, 0.5]),
-            clock: clock,
-            sleeper: sleeper
+        let status = try await pollStatus(
+            requestID: requestID,
+            checkoutStarted: checkoutStarted,
+            short: true
         )
-        let status = try await shortPoller.poll {
-            try await self.readConfiguredStatus(
-                requestID: requestID,
-                checkoutStarted: checkoutStarted
-            )
-        }
         return settle(status, requestID: requestID)
     }
 
-    private func pollStatus(requestID: String, checkoutStarted: Date) async throws -> ClientStatus {
+    private func pollStatus(
+        requestID: String,
+        checkoutStarted: Date,
+        source: StatusSource? = nil,
+        short: Bool = false
+    ) async throws -> ClientStatus {
+        let source = source ?? config.statusSource
+        let window = short ? min(3, config.poll.timeout) : config.poll.timeout
+        let deadline = clock.now().addingTimeInterval(window)
+        let reserve = short && canUseBackstop(source) ? window / 2 : 0
+        let primaryDeadline = deadline.addingTimeInterval(-reserve)
         let poller = StatusPoller(
-            policy: config.poll,
+            policy: PollPolicy(
+                timeout: window - reserve,
+                delays: short ? [0, 0.25, 0.5] : config.poll.delays
+            ),
             clock: clock,
             sleeper: sleeper
         )
-        return try await poller.poll {
-            try await self.readConfiguredStatus(
+        let primary = try await poller.pollWithBudget { budget in
+            let readDeadline = short ? primaryDeadline : self.clock.now().addingTimeInterval(budget)
+            return try await self.readStatus(
                 requestID: requestID,
-                checkoutStarted: checkoutStarted
+                source: source,
+                checkoutStarted: checkoutStarted,
+                deadline: readDeadline,
+                allowBackstop: !short
             )
         }
+        try Task.checkCancellation()
+        guard primary == .processing, reserve > 0,
+              let key = config.publishableKey else { return primary }
+        // The short return window reserves one last read even before the normal threshold.
+        return try await readM2CBackstop(
+            requestID: requestID,
+            publishableKey: key,
+            timeout: deadline.timeIntervalSince(clock.now())
+        )
     }
 
     private func readConfiguredStatus(
@@ -496,51 +491,122 @@ public final class M2CCheckoutClient {
         checkoutStarted: Date,
         forceBackstop: Bool = false
     ) async throws -> ClientStatus {
-        let primary: ClientStatus
-        switch config.statusSource {
+        try await readStatus(
+            requestID: requestID,
+            source: config.statusSource,
+            checkoutStarted: checkoutStarted,
+            deadline: clock.now().addingTimeInterval(30),
+            forceBackstop: forceBackstop
+        )
+    }
+
+    private func readPrimaryStatus(requestID: String, source: StatusSource) async throws -> ClientStatus {
+        switch source {
         case .m2c:
             guard let key = config.publishableKey else {
                 throw M2CCheckoutError(.invalidRequest, "M2C status requires a publishable key")
             }
-            primary = try await transport.readM2CStatus(requestID: requestID, publishableKey: key)
+            return try await transport.readM2CStatus(requestID: requestID, publishableKey: key)
         case .url(let template):
-            primary = try await transport.readURLStatus(template: template, requestID: requestID)
+            return try await transport.readURLStatus(template: template, requestID: requestID)
         case .callback(let callback):
-            primary = try await readCallback(callback, requestID: requestID)
+            return try await readCallback(callback, requestID: requestID)
         case .subscribe:
             throw M2CCheckoutError(.invalidRequest, "subscribe status source is reserved for a future release")
         }
+    }
 
-        guard primary == .processing,
-              config.statusBackstop.enabled,
-              !isM2CPrimary,
-              let key = config.publishableKey,
-              forceBackstop || clock.now().timeIntervalSince(checkoutStarted) >= config.statusBackstop.threshold
-        else {
-            return primary
+    private func canUseBackstop(_ source: StatusSource) -> Bool {
+        guard config.statusBackstop.enabled, config.publishableKey != nil else { return false }
+        switch source {
+        case .url, .callback: return true
+        default: return false
         }
-        return try await readM2CBackstop(
+    }
+
+    private func readStatus(
+        requestID: String,
+        source: StatusSource,
+        checkoutStarted: Date,
+        deadline: Date,
+        forceBackstop: Bool = false,
+        allowBackstop: Bool = true
+    ) async throws -> ClientStatus {
+        try await resolveStatus(
             requestID: requestID,
-            publishableKey: key,
-            primary: primary
-        )
+            source: source,
+            checkoutStarted: checkoutStarted,
+            deadline: deadline,
+            forceBackstop: forceBackstop,
+            allowBackstop: allowBackstop
+        ) { try await self.readPrimaryStatus(requestID: requestID, source: source) }
+    }
+
+    private func resolveStatus(
+        requestID: String,
+        source: StatusSource,
+        checkoutStarted: Date,
+        deadline: Date,
+        forceBackstop: Bool,
+        allowBackstop: Bool,
+        primaryRead: @escaping @Sendable () async throws -> ClientStatus
+    ) async throws -> ClientStatus {
+        try Task.checkCancellation()
+        let remaining = deadline.timeIntervalSince(clock.now())
+        guard remaining > 0 else { return .processing }
+        let useBackstop = allowBackstop && canUseBackstop(source)
+        let untilThreshold = config.statusBackstop.threshold - clock.now().timeIntervalSince(checkoutStarted)
+        let primaryBudget = useBackstop
+            ? (forceBackstop || untilThreshold <= 0 ? remaining / 2 : min(remaining, untilThreshold))
+            : remaining
+        var primaryError: Error?
+        do {
+            let primary = try await StatusPoller(policy: config.poll, clock: clock, sleeper: sleeper).readOnce(
+                timeout: primaryBudget,
+                read: primaryRead
+            )
+            try Task.checkCancellation()
+            if primary != .processing { return primary }
+        } catch {
+            if Task.isCancelled || error is CancellationError { throw CancellationError() }
+            guard isRetryable(error) else { throw error }
+            primaryError = error
+        }
+        try Task.checkCancellation()
+        if useBackstop, let key = config.publishableKey,
+           forceBackstop || clock.now().timeIntervalSince(checkoutStarted) >= config.statusBackstop.threshold {
+            let backstop = try await readM2CBackstop(
+                requestID: requestID,
+                publishableKey: key,
+                timeout: deadline.timeIntervalSince(clock.now())
+            )
+            if backstop != .processing { return backstop }
+        }
+        if let primaryError { throw primaryError }
+        return .processing
     }
 
     private func readM2CBackstop(
         requestID: String,
         publishableKey: String,
-        primary: ClientStatus
+        timeout: TimeInterval
     ) async throws -> ClientStatus {
+        try Task.checkCancellation()
+        guard timeout > 0 else { return .processing }
         do {
-            return try await transport.readM2CStatus(
-                requestID: requestID,
-                publishableKey: publishableKey
-            )
+            let status = try await StatusPoller(policy: config.poll, clock: clock, sleeper: sleeper).readOnce(timeout: timeout) {
+                try await self.transport.readM2CStatus(
+                    requestID: requestID,
+                    publishableKey: publishableKey
+                )
+            }
+            try Task.checkCancellation()
+            return status
         } catch is CancellationError {
             throw CancellationError()
         } catch {
             if Task.isCancelled { throw CancellationError() }
-            return primary
+            return .processing
         }
     }
 
@@ -566,17 +632,13 @@ public final class M2CCheckoutClient {
         forceBackstop: Bool = false
     ) async throws -> ClientStatus {
         let timeout = min(config.poll.timeout, 3)
-        return try await StatusPoller(
-            policy: config.poll,
-            clock: clock,
-            sleeper: sleeper
-        ).readOnce(timeout: timeout) {
-            try await self.readConfiguredStatus(
-                requestID: requestID,
-                checkoutStarted: checkoutStarted,
-                forceBackstop: forceBackstop
-            )
-        }
+        return try await readStatus(
+            requestID: requestID,
+            source: config.statusSource,
+            checkoutStarted: checkoutStarted,
+            deadline: clock.now().addingTimeInterval(timeout),
+            forceBackstop: forceBackstop
+        )
     }
 
     private var sourceKind: ResumeRecord.SourceKind {
@@ -586,11 +648,6 @@ public final class M2CCheckoutClient {
         case .callback: return .callback
         case .subscribe: return .callback
         }
-    }
-
-    private var isM2CPrimary: Bool {
-        if case .m2c = config.statusSource { return true }
-        return false
     }
 
     private var statusTemplate: String? {

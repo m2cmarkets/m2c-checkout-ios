@@ -104,6 +104,27 @@ final class ValidationTests: XCTestCase {
         XCTAssertLessThan(Date().timeIntervalSince(started), 0.75)
     }
 
+    func testBudgetedPollPreservesRetryAfterAndFinalRead() async throws {
+        let time = AdvancingTestTime()
+        let budgets = LockedBudgets()
+        let status = try await StatusPoller(
+            policy: PollPolicy(timeout: 5, delays: [0, 0, 4]),
+            clock: time, sleeper: time
+        ).pollWithBudget { budget in
+            switch budgets.append(budget) {
+            case 1:
+                throw M2CCheckoutError(.rateLimited, "retry later", retryAfter: 2)
+            case 2:
+                return .processing
+            default:
+                return .completed
+            }
+        }
+        XCTAssertEqual(status, .completed)
+        XCTAssertEqual(budgets.values, [5, 3, 5])
+        XCTAssertEqual(time.elapsed, 5)
+    }
+
     func testPollerDeadlineDoesNotWaitForCancellationInsensitiveRead() async throws {
         let started = Date()
         let status = try await StatusPoller(
@@ -159,6 +180,22 @@ final class ValidationTests: XCTestCase {
                 XCTAssertEqual((error as? M2CCheckoutError)?.code, .invalidRequest)
             }
         }
+    }
+}
+
+private final class LockedBudgets: @unchecked Sendable {
+    private let lock = NSLock()
+    private var budgets: [TimeInterval] = []
+    var values: [TimeInterval] {
+        lock.lock()
+        defer { lock.unlock() }
+        return budgets
+    }
+    func append(_ budget: TimeInterval) -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        budgets.append(budget)
+        return budgets.count
     }
 }
 

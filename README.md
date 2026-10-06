@@ -1,5 +1,11 @@
 # M2C Checkout for iOS
 
+For mobile HTTP(S) checkout or shop-session returns, register each exact origin
+under **Mobile return origins** on the publishable key in Credentials. Live keys
+require HTTPS; test keys also allow explicitly registered loopback HTTP origins.
+Empty registration blocks HTTP(S) returns. Paths and queries belong in the return
+URL, not the origin registration. Custom schemes remain separately registered.
+
 Shop sessions use the sibling `M2CShopSessionClient`. They create one vendor
 storefront browsing session, launch it without waiting for a return, and offer
 an optional one-shot status read. Purchases remain authoritative through your
@@ -11,7 +17,7 @@ Add `https://github.com/m2cmarkets/m2c-checkout-ios.git` in Swift Package
 Manager, select the `M2CCheckout` product, choose a released semantic version,
 and import `M2CCheckout`.
 
-Current version: `0.10.0`.
+Current version: `0.11.0`.
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for the complete dashboard, return-routing,
 status-endpoint, release-build, and TestFlight or App Store deployment setup.
@@ -81,6 +87,22 @@ entitlement and matching AASA paths for both the success and cancel URLs.
 Call `tryResume()` after recreating the client at app launch. A pending recovery
 must be resumed before `start`; a new start fails with `invalidRequest` instead
 of replacing the earlier checkout record.
+
+The M2C status backstop is opt-in: set `statusBackstop.enabled` and supply a
+publishable key. URL and callback primaries keep precedence. Processing or
+retryable primary errors become eligible after `statusBackstop.threshold`;
+actionable errors and task cancellation propagate. Short ambiguous-return polls
+reserve time for one final M2C read within their existing timeout, even before
+that threshold. Recovery uses the saved URL template as its primary.
+
+`canceled` and `pendingTimeout` describe the client flow, not proof that payment
+did not happen. Dismissal, a cancel return, or timeout clears SDK recovery state
+and permits another explicit checkout; task cancellation after exposure keeps
+recovery and blocks another start until `tryResume()` resolves it. Keep the
+original request ID on your backend and reconcile that payment before retrying
+the same logical order. Deduplicate fulfillment by order as well as webhook
+event, and distinguish a new intended purchase from a retry of an uncertain one.
+Status recovery never invokes the merchant's native payment fallback.
 
 ## Shop sessions
 
